@@ -4,6 +4,9 @@
 char *page_test;
 size_t page_test_length;
 
+/*
+ * Critical error.
+ */
 static void
 die(const char * const message)
 {
@@ -11,27 +14,37 @@ die(const char * const message)
 	exit(EXIT_FAILURE);
 }
 
-int
-main(void)
+static void
+read_file(const char *path, char **page_content, size_t *page_length)
 {
-	size_t numbytes;
-	FILE *f = fopen("testpage.html", "r");
+	FILE *f = fopen(path, "r");
 	if (!f)
 	{
 		die("testpage.html cannot be read.");
 	}
 	fseek(f, 0L, SEEK_END);
-	page_test_length = numbytes = ftell(f);
+	*page_length = ftell(f);
 	fseek(f, 0L, SEEK_SET);
-	page_test = (char*)calloc(numbytes, sizeof(char));
-	fread(page_test, sizeof(char), numbytes, f);
+	*page_content = (char*)calloc(*page_length, sizeof(char));
+	fread(*page_content, sizeof(char), *page_length, f);
 	fclose(f);
+}
 
+/*
+ * Main entry point.
+ */
+int
+main(void)
+{
+	read_file("testpage.html", &page_test, &page_test_length);
 	serve_forever();
 	free(page_test);
 	return 0;
 }
 
+/*
+ * Serve the client.
+ */
 void
 route(void)
 {
@@ -45,10 +58,9 @@ route(void)
 		}
 		else if (strcmp("/info", uri) == 0)
 		{
+			struct Header *h = request_headers();
 			printf("HTTP/1.1 200 OK\r\n\r\n");
-			//printf("List of request headers:\r\n\r\n");
-
-			header_t *h = request_headers();
+			printf("List of request headers:\n");
 
 			while (h->name)
 			{
@@ -61,14 +73,6 @@ route(void)
 			printf("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-length: %ld\r\n\r\n", page_test_length);
 			puts(page_test);
 		}
-	}
-	else if (strcmp("/", uri) == 0 && strcmp("POST", method) == 0)
-	{
-		printf("HTTP/1.1 200 OK\r\n\r\n");
-		/*
-		printf("Wow, seems that you POSTed %d bytes. \r\n", payload_size);
-		printf("Fetch the data using `payload` variable.");
-		*/
 	}
 	else
 	{

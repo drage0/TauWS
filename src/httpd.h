@@ -1,8 +1,15 @@
-#ifndef _HTTPD_H___
-#define _HTTPD_H___
+#pragma once
 
 #include <string.h>
 #include <stdio.h>
+#define T_DOPRINT
+#ifdef T_DOPRINT
+#define T_INFOEX(s, ...) printf("[i]"s"\n", __VA_ARGS__)
+#define T_INFO(s)        printf("[i]%s\n",  s)
+#else
+#define T_INFOEX(s, ...)
+#define T_INFO(s)
+#endif
 
 // Server control functions
 
@@ -10,33 +17,19 @@ void serve_forever(void);
 
 // Client request
 
-char *method, // "GET" or "POST"
-    *uri,     // "/index.html" things before '?'
-    *qs,      // "a=1&b=2"     things after  '?'
-    *prot;    // "HTTP/1.1"
-
-char *payload; // for POST
-int payload_size;
+char *method;  /* "GET" or "POST" */
+char *uri;     /* "/index.html" things before '?' */
+char *qs;      /* "a=1&b=2"     things after  '?' */
+char *prot;    /* "HTTP/1.1" */
 
 char *request_header(const char *name);
 
-typedef struct { char *name, *value; } header_t;
-static header_t reqhdr[17] = {{"\0", "\0"}};
-header_t *request_headers(void);
+struct Header
+{
+	char *name, *value;
+};
+static struct Header reqhdr[17] = {{"\0", "\0"}};
+struct Header *request_headers(void);
 
 // user shall implement this function
 extern void route(void);
-
-// some interesting macro for `route()`
-#define ROUTE_START() if (0) {
-#define ROUTE(METHOD, URI)                                                     \
-  }                                                                            \
-  else if (strcmp(URI, uri) == 0 && strcmp(METHOD, method) == 0) {
-#define ROUTE_GET(URI) ROUTE("GET", URI)
-#define ROUTE_POST(URI) ROUTE("POST", URI)
-#define ROUTE_END()                                                            \
-  }                                                                            \
-  else printf("HTTP/1.1 500 Internal Server Error\n\n"                         \
-              "The server has no handler to the request.\n");
-
-#endif
