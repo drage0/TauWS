@@ -13,27 +13,26 @@
 #include <fcntl.h>
 #include <signal.h>
 
+#define PORT "8000"
 #define MAX_CONNECTIONS 1000
 #define NOCLIENT -1
 static int listenfd;
 int * clients;
-static void error(char *);
 static void server_start(const char *);
-static void respond(int);
+static void respond(size_t);
 
 static int clientfd;
 
 static char *buf;
 
-void serve_forever(const char *PORT)
+void serve_forever(void)
 {
 	struct sockaddr_in clientaddr;
 	socklen_t addrlen;
-	char c;
+	size_t active_slot;
 
-	int slot = 0;
 
-	printf("Listening on port %s...\n", PORT);
+	puts("Listening on port "PORT"...\n");
 
 	// create shared memory for client slot array
 	clients = mmap(NULL, sizeof(*clients)*MAX_CONNECTIONS, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
@@ -50,12 +49,13 @@ void serve_forever(const char *PORT)
 	signal(SIGCHLD, SIG_IGN);
 
 	// ACCEPT connections
+	active_slot = 0;
 	for(;;)
 	{
 		addrlen = sizeof(clientaddr);
-		clients[slot] = accept(listenfd, (struct sockaddr *)&clientaddr, &addrlen);
+		clients[active_slot] = accept(listenfd, (struct sockaddr *)&clientaddr, &addrlen);
 
-		if (clients[slot] < 0)
+		if (clients[active_slot] < 0)
 		{
 			perror("accept() error");
 		}
@@ -63,13 +63,16 @@ void serve_forever(const char *PORT)
 		{
 			if (fork() == 0)
 			{
-				respond(slot);
+				respond(active_slot);
 				exit(0);
 			}
 		}
 
-		while (clients[slot] != -1)
-		slot = (slot + 1) % MAX_CONNECTIONS;
+		/* Find a new free slot for the next connection. */
+		while (clients[active_slot] != -1)
+		{
+			active_slot = (active_slot + 1) % MAX_CONNECTIONS;
+		}
 	}
 }
 
@@ -128,9 +131,8 @@ header_t *request_headers(void) {
 }
 
 // client connection
-void respond(int n) {
-	int rcvd, fd, bytes_read;
-	char *ptr;
+void respond(size_t n) {
+	int rcvd;
 
 	buf  = malloc(65535);
 	rcvd = recv(clients[n], buf, 65535, 0);

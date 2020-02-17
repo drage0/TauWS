@@ -12,7 +12,7 @@ die(const char * const message)
 }
 
 int
-main(int argc, char *argv[])
+main(void)
 {
 	size_t numbytes;
 	FILE *f = fopen("testpage.html", "r");
@@ -27,7 +27,7 @@ main(int argc, char *argv[])
 	fread(page_test, sizeof(char), numbytes, f);
 	fclose(f);
 
-	serve_forever("8000");
+	serve_forever();
 	free(page_test);
 	return 0;
 }

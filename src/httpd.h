@@ -6,7 +6,7 @@
 
 // Server control functions
 
-void serve_forever(const char *PORT);
+void serve_forever(void);
 
 // Client request
 
@@ -25,7 +25,6 @@ static header_t reqhdr[17] = {{"\0", "\0"}};
 header_t *request_headers(void);
 
 // user shall implement this function
-
 extern void route(void);
 
 // some interesting macro for `route()`

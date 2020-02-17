@@ -1,5 +1,5 @@
 CC=gcc
-FLAGS= -Wall -Wextra -pedantic
+FLAGS= -Wall -Wextra -pedantic -O3 -s
 
 all: server
 
