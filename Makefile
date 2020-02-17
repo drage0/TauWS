@@ -1,15 +1,7 @@
-all: server
+all:
+	@cd src && $(MAKE)
 
 clean:
-	@rm -rf *.o
-	@rm -rf server
+	@cd src && $(MAKE) clean
 
-server: main.o httpd.o
-	gcc -o server $^
-
-main.o: main.c httpd.h
-	gcc -c -o main.o main.c
-
-httpd.o: httpd.c httpd.h
-	gcc -c -o httpd.o httpd.c
-
+.PHONY: all clean

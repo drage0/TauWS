@@ -26,7 +26,7 @@ header_t *request_headers(void);
 
 // user shall implement this function
 
-void route();
+extern void route(void);
 
 // some interesting macro for `route()`
 #define ROUTE_START() if (0) {
