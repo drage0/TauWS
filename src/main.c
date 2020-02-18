@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/mman.h>
@@ -7,17 +6,22 @@
 #include <unistd.h>
 #include <netdb.h>
 #include <signal.h>
+#include "testpage.h"
 
-#define T_DOPRINT
-#ifdef T_DOPRINT
-	#define T_INFOEX(s, ...) printf("[i]"s"\n", __VA_ARGS__)
-	#define T_INFO(s)        printf("[i]%s\n",  s)
+#ifdef TAU_DEBUG_MODE
+	#include <stdio.h>
+	#define T_INFOEX(s, ...) fprintf(stdout, "[i] "s"\n", __VA_ARGS__)
+	#define T_INFO(s)        fprintf(stdout, "[i] %s\n",  s)
+	#define T_ISSUE(s)       fprintf(stderr, "[x] "s"\n");
+	#define die(s) do { fputs(message, stderr); exit(EXIT_FAILURE); } while(0)
 #else
 	#define T_INFOEX(s, ...)
 	#define T_INFO(s)
+	#define T_ISSUE(s)
+	#define die(s)
 #endif
 #define PORT "667"
-#define MAX_CONNECTIONS 1000
+#define MAX_CONNECTIONS (1<<10)
 #define NOCLIENT -1
 
 struct Header
@@ -34,18 +38,7 @@ struct ClientData
 static int listenfd;
 static int clientfd;
 static int *clients;
-static char *buf;
 static struct Header reqhdr[17] = {{"\0", "\0"}};
-
-char *page_test;
-size_t page_test_length;
-
-inline static void
-die(const char * const message)
-{
-	fputs(message, stderr);
-	exit(EXIT_FAILURE);
-}
 
 char *
 request_header(const char * const name)
@@ -62,6 +55,17 @@ request_header(const char * const name)
 	return NULL;
 }
 
+void
+number_to_string(size_t n, char buffer[8])
+{
+	size_t i = 0;
+	while (n > 0 && i < 8)
+	{
+		buffer[i++] = (n%10)+'0';
+		n = n/10;
+	}
+}
+
 /*
  * Serve the client.
  */
@@ -71,58 +75,54 @@ route(void)
 	const int method_get = (strcmp("GET", client.method) == 0);
 	if (method_get)
 	{
-		if (strcmp("/", client.uri) == 0)
+		if (strcmp("/info", client.uri) == 0)
 		{
-			printf("HTTP/1.1 200 OK\r\n\r\n");
-			printf("Hello! You are using %s", request_header("User-Agent"));
+			const char data[] = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 28\r\n\r\nOpen test! text/plain, utf-8";
+			write(clientfd, data, sizeof(data));
 		}
-		else if (strcmp("/info", client.uri) == 0)
+		else if (strcmp("/testpage.html", client.uri) == 0 || strcmp("/", client.uri) == 0)
 		{
-			struct Header *h = reqhdr;
-			printf("HTTP/1.1 200 OK\r\n\r\n");
-			printf("List of request headers:\n");
-
-			while (h->name)
-			{
-				printf("%s: %s\n", h->name, h->value);
-				h++;
-			}
-		}
-		else if (strcmp("/testpage.html", client.uri) == 0)
-		{
-			printf("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-length: %ld\r\n\r\n", page_test_length);
-			puts(page_test);
+			const char header[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-length: ";
+			char length[8];
+			const char endheader[4] = {'\r', '\n', '\r', '\n'};
+			number_to_string(testpage_html_len, length);
+			write(clientfd, header,    sizeof(header));
+			write(clientfd, length,    sizeof(length));
+			write(clientfd, endheader, sizeof(endheader));
+			write(clientfd, testpage_html, testpage_html_len);
 		}
 	}
 	else
 	{
-		printf("HTTP/1.1 500 Internal Server Error\n\n" "The server has no handler to the request.\n");
+		const char data[] = "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 41\r\n\r\nThe server has no handler to the request.";
+		write(clientfd, data, sizeof(data));
 	}
 }
 
 /*
  * Respond to a client connection.
  */
+#define MESSAGE_MAX_LENGTH 65535
 static void
 respond(const size_t i)
 {
-	ssize_t rcvd;
+	ssize_t message_length;
+	char *message;
 
-	buf  = malloc(65535);
-	rcvd = recv(clients[i], buf, 65535, 0);
-
-	if (rcvd < 0) // receive error
+	message        = malloc(MESSAGE_MAX_LENGTH);
+	message_length = recv(clients[i], message, MESSAGE_MAX_LENGTH, 0);
+	if (message_length < 0)
 	{
-		fprintf(stderr, "recv() error\n");
+		T_ISSUE("recv() error!");
 	}
-	else if (rcvd == 0) // receive socket closed
+	else if (message_length == 0) // receive socket closed
 	{
-		fprintf(stderr, "Client disconnected upexpectedly.\n");
+		T_ISSUE("Client disconnected upexpectedly.");
 	}
 	else
 	{
-		buf[rcvd] = '\0';
-		client.method   = strtok(buf,  " \t\r\n");
+		message[message_length] = '\0';
+		client.method   = strtok(message,  " \t\r\n");
 		client.uri      = strtok(NULL, " \t");
 		client.protocol = strtok(NULL, " \t\r\n");
 
@@ -166,27 +166,22 @@ respond(const size_t i)
 				}
 			}
 
-			// bind clientfd to stdout, making it easier to write
 			clientfd = clients[i];
-			dup2(clientfd, STDOUT_FILENO);
-			close(clientfd);
-
-			// call router
 			route();
 		}
 
 		// tidy up
-		fflush(stdout);
-		shutdown(STDOUT_FILENO, SHUT_WR);
-		close(STDOUT_FILENO);
+		shutdown(clientfd, SHUT_WR);
+		close(clientfd);
 	}
 	shutdown(clientfd, SHUT_RDWR); // All further send and recieve operations are DISABLED...
 	close(clientfd);
+	free(message);
 	clients[i] = NOCLIENT;
 }
 
-void
-serve_forever(void)
+int
+main(void)
 {
 	struct sockaddr_in clientaddr;
 	socklen_t addrlen;
@@ -215,10 +210,10 @@ serve_forever(void)
 		// socket and bind
 		for (p = res; p != NULL; p = p->ai_next)
 		{
-			int option = 1;
+			const int option = 1;
 			if ((listenfd = socket(p->ai_family, p->ai_socktype, 0)) < 0)
 			{
-				fprintf(stderr, "Socket creation issue!\n");
+				T_ISSUE("Socket creation issue!");
 			}
 			setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
 			if (listenfd == -1)
@@ -245,7 +240,7 @@ serve_forever(void)
 	// Ignore SIGCHLD to avoid zombie threads
 	signal(SIGCHLD, SIG_IGN);
 
-	puts("Listening on port "PORT"...\n");
+	T_INFO("Listening on port "PORT"...\n");
 	active_slot = 0;
 	for(;;)
 	{
@@ -254,7 +249,7 @@ serve_forever(void)
 
 		if (clients[active_slot] < 0)
 		{
-			perror("accept() error");
+			T_ISSUE("accept() issue");
 		}
 		else
 		{
@@ -268,32 +263,8 @@ serve_forever(void)
 		/* Find a new free slot for the next connection. */
 		while (clients[active_slot] != -1)
 		{
-			active_slot = (active_slot + 1) % MAX_CONNECTIONS;
+			active_slot = (active_slot+1)%MAX_CONNECTIONS;
 		}
 	}
-}
-
-static void
-read_file(const char *path, char **page_content, size_t *page_length)
-{
-	FILE *f = fopen(path, "r");
-	if (!f)
-	{
-		die("testpage.html cannot be read.");
-	}
-	fseek(f, 0L, SEEK_END);
-	*page_length = ftell(f);
-	fseek(f, 0L, SEEK_SET);
-	*page_content = (char*)calloc(*page_length, sizeof(char));
-	fread(*page_content, sizeof(char), *page_length, f);
-	fclose(f);
-}
-
-int
-main(void)
-{
-	read_file("testpage.html", &page_test, &page_test_length);
-	serve_forever();
-	free(page_test);
 	return 0;
 }
