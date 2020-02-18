@@ -40,7 +40,7 @@ static int listenfd;
 static int *clients;
 static struct Header reqhdr[17] = {{"\0", "\0"}};
 
-char *
+static char *
 request_header(const char * const name)
 {
 	const struct Header *h = reqhdr;
@@ -55,7 +55,7 @@ request_header(const char * const name)
 	return NULL;
 }
 
-void
+static void
 number_to_string(size_t n, char buffer[8])
 {
 	size_t i = 0;
