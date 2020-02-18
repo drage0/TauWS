@@ -34,9 +34,9 @@ struct ClientData
 	char *query;    /* Query string, after '?'. */
 	char *uri;
 	char *protocol; /* Only allowing "HTTP/1.1". */
+	int file;       /* The file descriptor for writing. */
 } client;
 static int listenfd;
-static int clientfd;
 static int *clients;
 static struct Header reqhdr[17] = {{"\0", "\0"}};
 
@@ -78,7 +78,7 @@ route(void)
 		if (strcmp("/info", client.uri) == 0)
 		{
 			const char data[] = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 28\r\n\r\nOpen test! text/plain, utf-8";
-			write(clientfd, data, sizeof(data));
+			write(client.file, data, sizeof(data));
 		}
 		else if (strcmp("/testpage.html", client.uri) == 0 || strcmp("/", client.uri) == 0)
 		{
@@ -86,16 +86,16 @@ route(void)
 			char length[8];
 			const char endheader[4] = {'\r', '\n', '\r', '\n'};
 			number_to_string(testpage_html_len, length);
-			write(clientfd, header,    sizeof(header));
-			write(clientfd, length,    sizeof(length));
-			write(clientfd, endheader, sizeof(endheader));
-			write(clientfd, testpage_html, testpage_html_len);
+			write(client.file, header,    sizeof(header));
+			write(client.file, length,    sizeof(length));
+			write(client.file, endheader, sizeof(endheader));
+			write(client.file, testpage_html, testpage_html_len);
 		}
 	}
 	else
 	{
 		const char data[] = "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 41\r\n\r\nThe server has no handler to the request.";
-		write(clientfd, data, sizeof(data));
+		write(client.file, data, sizeof(data));
 	}
 }
 
@@ -166,16 +166,16 @@ respond(const size_t i)
 				}
 			}
 
-			clientfd = clients[i];
+			client.file = clients[i];
 			route();
 		}
 
 		// tidy up
-		shutdown(clientfd, SHUT_WR);
-		close(clientfd);
+		shutdown(client.file, SHUT_WR);
+		close(client.file);
 	}
-	shutdown(clientfd, SHUT_RDWR); // All further send and recieve operations are DISABLED...
-	close(clientfd);
+	shutdown(client.file, SHUT_RDWR); // All further send and recieve operations are DISABLED...
+	close(client.file);
 	free(message);
 	clients[i] = NOCLIENT;
 }
