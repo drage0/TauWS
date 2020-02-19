@@ -168,9 +168,9 @@ main(void)
 
 		// getaddrinfo for host
 		memset(&hints, 0, sizeof(hints));
-		hints.ai_family = AF_INET;
+		hints.ai_family   = AF_INET;
 		hints.ai_socktype = SOCK_STREAM;
-		hints.ai_flags = AI_PASSIVE;
+		hints.ai_flags    = AI_PASSIVE;
 		if (getaddrinfo(NULL, PORT, &hints, &res) != 0)
 		{
 			die("getaddrinfo issue!");
