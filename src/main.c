@@ -26,10 +26,8 @@
 
 struct ClientData
 {
-	char *method;   /* Only GET method is implemented. */
 	char *query;    /* Query string, after '?'. */
 	char *uri;
-	char *protocol; /* Only allowing "HTTP/1.1". */
 	int file;       /* The file descriptor for writing. */
 } client;
 static int listenfd;
@@ -41,25 +39,21 @@ static int *clients;
 static void
 route(void)
 {
-	const int method_get = (strcmp("GET", client.method) == 0);
-	if (method_get)
+	if (strcmp("/info", client.uri) == 0)
 	{
-		if (strcmp("/info", client.uri) == 0)
-		{
-			const char data[] = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 28\r\n\r\nOpen test! text/plain, utf-8";
-			write(client.file, data, sizeof(data));
-		}
-		else if (strcmp("/testpage.html", client.uri) == 0 || strcmp("/", client.uri) == 0)
-		{
-			const char header[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-length: "testpage_html_strlen"\r\n\r\n";
-			write(client.file, header,               sizeof(header)-1);
-			write(client.file, testpage_html,        testpage_html_len);
-		}
+		const char data[] = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 28\r\n\r\nOpen test! text/plain, utf-8";
+		write(client.file, data, sizeof(data)-1);
+	}
+	else if (strcmp("/testpage.html", client.uri) == 0 || strcmp("/", client.uri) == 0)
+	{
+		const char header[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-length: "testpage_html_strlen"\r\n\r\n";
+		write(client.file, header,               sizeof(header)-1);
+		write(client.file, testpage_html,        testpage_html_len);
 	}
 	else
 	{
-		const char data[] = "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 41\r\n\r\nThe server has no handler to the request.";
-		write(client.file, data, sizeof(data));
+		const char data[] = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nContent-length: 22\r\n\r\n404, Nyx, Nyx...";
+		write(client.file, data, sizeof(data)-1);
 	}
 }
 
@@ -85,12 +79,14 @@ respond(const size_t i)
 	}
 	else
 	{
+		char *protocol;
+		char *method;
 		message[message_length] = '\0';
-		client.method   = strtok(message,  " \t\r\n");
-		client.uri      = strtok(NULL, " \t");
-		client.protocol = strtok(NULL, " \t\r\n");
+		method          = strtok(message, " \t\r\n");
+		client.uri      = strtok(NULL,    " \t");
+		protocol        = strtok(NULL,    " \t\r\n");
 
-		if (strcmp(client.protocol, "HTTP/1.1") == 0)
+		if (strcmp(protocol, "HTTP/1.1") == 0 && strcmp("GET", method) == 0)
 		{
 			int serve = 0;
 
@@ -101,9 +97,9 @@ respond(const size_t i)
 			}
 			else
 			{
-				client.query = client.uri - 1; // use an empty string
+				client.query = client.uri-1; // use an empty string
 			}
-			T_INFOEX("protocol:%s\tmethod=%s\turi=%s\tquery=%s", client.protocol, client.method, client.uri, client.query);
+			T_INFOEX("protocol:%s\tmethod=%s\turi=%s\tquery=%s", protocol, method, client.uri, client.query);
 
 			/* Find headers. */
 			for (size_t i = 0; i < 16; i++)
