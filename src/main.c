@@ -235,5 +235,5 @@ main(void)
 			active_slot = (active_slot+1)%MAX_CONNECTIONS;
 		}
 	}
-	return 0;
+	return EXIT_SUCCESS;
 }
