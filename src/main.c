@@ -13,7 +13,7 @@
 	#define T_INFOEX(s, ...) fprintf(stdout, "[i] "s"\n", __VA_ARGS__)
 	#define T_INFO(s)        fprintf(stdout, "[i] %s\n",  s)
 	#define T_ISSUE(s)       fprintf(stderr, "[x] "s"\n");
-	#define die(s) do { fputs(message, stderr); exit(EXIT_FAILURE); } while(0)
+	#define die(s) do { fputs(s, stderr); exit(EXIT_FAILURE); } while(0)
 #else
 	#define T_INFOEX(s, ...)
 	#define T_INFO(s)
@@ -24,10 +24,6 @@
 #define MAX_CONNECTIONS (1<<10)
 #define NOCLIENT -1
 
-struct Header
-{
-	char *name, *value;
-};
 struct ClientData
 {
 	char *method;   /* Only GET method is implemented. */
@@ -38,33 +34,6 @@ struct ClientData
 } client;
 static int listenfd;
 static int *clients;
-static struct Header reqhdr[17] = {{"\0", "\0"}};
-
-static char *
-request_header(const char * const name)
-{
-	const struct Header *h = reqhdr;
-	while (h->name)
-	{
-		if (strcmp(h->name, name) == 0)
-		{
-			return h->value;
-		}
-		h++;
-	}
-	return NULL;
-}
-
-static void
-number_to_string(size_t n, char buffer[8])
-{
-	size_t i = 0;
-	while (n > 0 && i < 8)
-	{
-		buffer[i++] = (n%10)+'0';
-		n = n/10;
-	}
-}
 
 /*
  * Serve the client.
@@ -82,14 +51,9 @@ route(void)
 		}
 		else if (strcmp("/testpage.html", client.uri) == 0 || strcmp("/", client.uri) == 0)
 		{
-			const char header[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-length: ";
-			char length[8];
-			const char endheader[4] = {'\r', '\n', '\r', '\n'};
-			number_to_string(testpage_html_len, length);
-			write(client.file, header,    sizeof(header));
-			write(client.file, length,    sizeof(length));
-			write(client.file, endheader, sizeof(endheader));
-			write(client.file, testpage_html, testpage_html_len);
+			const char header[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-length: "testpage_html_strlen"\r\n\r\n";
+			write(client.file, header,               sizeof(header)-1);
+			write(client.file, testpage_html,        testpage_html_len);
 		}
 	}
 	else
@@ -128,7 +92,8 @@ respond(const size_t i)
 
 		if (strcmp(client.protocol, "HTTP/1.1") == 0)
 		{
-			struct Header *h = reqhdr;
+			int serve = 0;
+
 			client.query = strchr(client.uri, '?');
 			if (client.query)
 			{
@@ -141,7 +106,7 @@ respond(const size_t i)
 			T_INFOEX("protocol:%s\tmethod=%s\turi=%s\tquery=%s", client.protocol, client.method, client.uri, client.query);
 
 			/* Find headers. */
-			while (h < reqhdr+16)
+			for (size_t i = 0; i < 16; i++)
 			{
 				char *key, *value, *t;
 
@@ -154,10 +119,11 @@ respond(const size_t i)
 				{
 					value++;
 				}
-				h->name  = key;
-				h->value = value;
-				h++;
 				T_INFOEX("%s: %s", key, value);
+				if (strncmp(key, "User-Agent", 10) == 0)
+				{
+					serve = !(value[0] == '-' || (value[0] == 'P' && value[1] == 'y'));
+				}
 
 				t = value+strlen(value)+1;
 				if (t[1] == '\r' && t[2] == '\n')
@@ -167,7 +133,10 @@ respond(const size_t i)
 			}
 
 			client.file = clients[i];
-			route();
+			if (serve)
+			{
+				route();
+			}
 		}
 
 		// tidy up
