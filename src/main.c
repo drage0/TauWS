@@ -1,27 +1,30 @@
 #include <string.h>
 #include <stdlib.h>
-#include <sys/mman.h>
 #include <sys/types.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
+#include <signal.h>
 #include <unistd.h>
 #include <netdb.h>
-#include <signal.h>
 #include "testpage.h"
 
 #ifdef TAU_DEBUG_MODE
 	#include <stdio.h>
-	#define T_INFOEX(s, ...) fprintf(stdout, "[i] "s"\n", __VA_ARGS__)
-	#define T_INFO(s)        fprintf(stdout, "[i] %s\n",  s)
-	#define T_ISSUE(s)       fprintf(stderr, "[x] "s"\n");
+	#include <errno.h>
+	#define T_INFOEX(s, ...)  fprintf(stdout, "[i] "s"\n", __VA_ARGS__)
+	#define T_INFO(s)         fprintf(stdout, "[i] %s\n",  s)
+	#define T_ISSUE(s)        fprintf(stderr, "[x] "s"\n");
+	#define T_ISSUEEX(s, ...) fprintf(stdout, "[x] "s"\n", __VA_ARGS__)
 	#define die(s) do { fputs(s, stderr); exit(EXIT_FAILURE); } while(0)
 #else
 	#define T_INFOEX(s, ...)
 	#define T_INFO(s)
 	#define T_ISSUE(s)
+	#define T_ISSUEEX(s, ...)
 	#define die(s)
 #endif
 #define PORT "667"
-#define MAX_CONNECTIONS (1<<10)
+#define MAX_CONNECTIONS 8
 #define NOCLIENT -1
 
 struct ClientData
@@ -29,15 +32,14 @@ struct ClientData
 	char *query;    /* Query string, after '?'. */
 	char *uri;
 	int file;       /* The file descriptor for writing. */
-} client;
-static int listenfd;
-static int *clients;
+};
+static int *clients_slots;
 
 /*
  * Serve the client.
  */
 static void
-route(void)
+route(const struct ClientData client)
 {
 	if (strcmp("/info", client.uri) == 0)
 	{
@@ -62,20 +64,24 @@ route(void)
  */
 #define MESSAGE_MAX_LENGTH 65535
 static void
-respond(const size_t i)
+respond(const size_t file_index, const int file)
 {
+	struct ClientData client;
 	ssize_t message_length;
 	char *message;
 
+	client.file    = file;
 	message        = malloc(MESSAGE_MAX_LENGTH);
-	message_length = recv(clients[i], message, MESSAGE_MAX_LENGTH, 0);
+	message_length = recv(client.file, message, MESSAGE_MAX_LENGTH, 0);
 	if (message_length < 0)
 	{
 		T_ISSUE("recv() error!");
+		clients_slots[file_index] = -1;
 	}
 	else if (message_length == 0) // receive socket closed
 	{
 		T_ISSUE("Client disconnected upexpectedly.");
+		clients_slots[file_index] = -1;
 	}
 	else
 	{
@@ -99,7 +105,7 @@ respond(const size_t i)
 			{
 				client.query = client.uri-1; // use an empty string
 			}
-			T_INFOEX("protocol:%s\tmethod=%s\turi=%s\tquery=%s", protocol, method, client.uri, client.query);
+			T_INFOEX("CONNECTION uri=%s\tquery=%s", client.uri, client.query);
 
 			/* Find headers. */
 			for (size_t i = 0; i < 16; i++)
@@ -115,7 +121,6 @@ respond(const size_t i)
 				{
 					value++;
 				}
-				T_INFOEX("%s: %s", key, value);
 				if (strncmp(key, "User-Agent", 10) == 0)
 				{
 					serve = !(value[0] == '-' || (value[0] == 'P' && value[1] == 'y'));
@@ -128,35 +133,30 @@ respond(const size_t i)
 				}
 			}
 
-			client.file = clients[i];
 			if (serve)
 			{
-				route();
+				route(client);
 			}
 		}
-
-		// tidy up
-		shutdown(client.file, SHUT_WR);
-		close(client.file);
 	}
-	shutdown(client.file, SHUT_RDWR); // All further send and recieve operations are DISABLED...
-	close(client.file);
 	free(message);
-	clients[i] = NOCLIENT;
+	clients_slots[file_index] = NOCLIENT;
 }
 
 int
 main(void)
 {
-	struct sockaddr_in clientaddr;
-	socklen_t addrlen;
 	size_t active_slot;
-
-	clients = mmap(NULL, sizeof(*clients)*MAX_CONNECTIONS, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+	int listenfd, *clients;
+	clients       = malloc(sizeof(int)*MAX_CONNECTIONS);
+	clients_slots = mmap(NULL, sizeof(*clients)*MAX_CONNECTIONS, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
 	for (int i = 0; i < MAX_CONNECTIONS; i++)
 	{
-		clients[i] = NOCLIENT;
+		clients[i]       = NOCLIENT;
+		clients_slots[i] = NOCLIENT;
 	}
+	signal(SIGPIPE, SIG_IGN);
+	signal(SIGCHLD, SIG_IGN);
 
 	/* Start the server. */
 	{
@@ -173,12 +173,13 @@ main(void)
 		}
 
 		// socket and bind
+		listenfd = -1;
 		for (p = res; p != NULL; p = p->ai_next)
 		{
 			const int option = 1;
 			if ((listenfd = socket(p->ai_family, p->ai_socktype, 0)) < 0)
 			{
-				T_ISSUE("Socket creation issue!");
+				die("Socket creation issue!");
 			}
 			setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
 			if (listenfd == -1)
@@ -191,7 +192,7 @@ main(void)
 			}
 		}
 
-		if (p == NULL)
+		if (p == NULL || listenfd == -1)
 		{
 			die("Socket or bind issue!");
 		}
@@ -202,34 +203,44 @@ main(void)
 		}
 	}
 
-	// Ignore SIGCHLD to avoid zombie threads
-	signal(SIGCHLD, SIG_IGN);
-
 	T_INFO("Listening on port "PORT"...\n");
 	active_slot = 0;
 	for(;;)
 	{
-		addrlen = sizeof(clientaddr);
-		clients[active_slot] = accept(listenfd, (struct sockaddr *)&clientaddr, &addrlen);
-
+		clients[active_slot] = accept(listenfd, NULL, NULL); // - Too many open files
 		if (clients[active_slot] < 0)
 		{
-			T_ISSUE("accept() issue");
+			T_ISSUEEX("%d accept() issue. %d %s", getpid(), clients[active_slot], strerror(errno));
+			exit(EXIT_FAILURE);
 		}
 		else
 		{
-			if (fork() == 0)
+			pid_t pid = fork();
+			if (pid == 0)
 			{
-				respond(active_slot);
+				respond(active_slot, clients[active_slot]);
+				free(clients);
 				exit(EXIT_SUCCESS);
 			}
+			else if (pid == -1)
+			{
+				T_ISSUE("fork() issue");
+				clients_slots[active_slot] = -1;
+			}
+			clients_slots[active_slot] = 1;
 		}
 
 		/* Find a new free slot for the next connection. */
-		while (clients[active_slot] != -1)
+		do
 		{
 			active_slot = (active_slot+1)%MAX_CONNECTIONS;
+		} while (clients_slots[active_slot] != NOCLIENT);
+		if (clients[active_slot] != NOCLIENT)
+		{
+			shutdown(clients[active_slot], SHUT_RDWR);
+			close(clients[active_slot]);
 		}
 	}
+	free(clients);
 	return EXIT_SUCCESS;
 }
