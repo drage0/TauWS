@@ -196,7 +196,7 @@ main(void)
 			die("Socket or bind issue!");
 		}
 		freeaddrinfo(res);
-		if (listen(listenfd, 1000000) != 0)
+		if (listen(listenfd, 32) != 0)
 		{
 			die("Listen issue!");
 		}
