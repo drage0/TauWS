@@ -140,6 +140,7 @@ respond(const size_t file_index, const int file)
 		}
 	}
 	free(message);
+	shutdown(client.file, SHUT_RDWR);
 	clients_slots[file_index] = NOCLIENT;
 }
 
@@ -235,9 +236,9 @@ main(void)
 		{
 			active_slot = (active_slot+1)%MAX_CONNECTIONS;
 		} while (clients_slots[active_slot] != NOCLIENT);
+		/* Was there a client connected to this slot? */
 		if (clients[active_slot] != NOCLIENT)
 		{
-			shutdown(clients[active_slot], SHUT_RDWR);
 			close(clients[active_slot]);
 		}
 	}
